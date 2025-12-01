@@ -1,0 +1,6 @@
+Category,Total,Correct,Accuracy (%),False Positives,False Negatives,True Positives,True Negatives
+Carmichael,146,125,85.62,20,0,30,95
+Composite,181,180,99.45,0,0,0,180
+Prime,182,181,99.45,0,0,180,1
+Pseudoprime,71,70,98.59,0,0,30,40
+OVERALL,454,434,95.59,20,0,180,254
