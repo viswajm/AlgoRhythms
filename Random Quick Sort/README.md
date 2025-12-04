@@ -1,262 +1,127 @@
-# Randomized Quick Sort
+echo "5 3 1 4 2" | ./rqs
+echo -e "5\n3 1 4 2 5" | ./rqs
+# Randomized Quick Sort Experiment Driver
 
-Implementation and experimental analysis of Randomized Quick Sort with comprehensive performance benchmarking across different input distributions and pivot selection strategies.
+This project provides a command-line harness for studying how different Quick Sort pivot policies behave on a variety of input distributions. The core executable (`rqs.cpp`) generates data, runs the selected algorithm variant, and emits CSV-formatted measurements for downstream analysis.
 
-## Overview
+## Quick Start
 
-This project implements Quick Sort with random pivot selection and compares its performance against deterministic variants. The implementation includes detailed instrumentation for counting comparisons, swaps, and measuring execution time.
+```powershell
+# Compile (PowerShell)
 
-## Algorithm Description
 
-Quick Sort is a divide-and-conquer sorting algorithm:
+# Run five trials on nearly sorted arrays of length 5000
+./rqs --n 5000 --trials 5 --variant det_med3 --input nearly_sorted --nearly_k 20
 
-1. **Pivot Selection**: Choose a pivot element (randomly or deterministically)
-2. **Partitioning**: Rearrange array so elements < pivot come before elements > pivot
-3. **Recursion**: Recursively sort the subarrays on either side of the pivot
+# Save results to a file
+./rqs --n 20000 --trials 20 > results.csv
+```
 
-### Randomized Quick Sort
+Use `make` if you prefer the provided `Makefile`, or call the compiler directly as shown above. On Windows PowerShell you may use either `./rqs` or `rqs.exe` when launching the program.
 
-The randomized version selects the pivot uniformly at random:
-- Expected time complexity: **O(n log n)**
-- Worst case: O(n²) but with very low probability
-- In-place sorting with O(log n) stack space
+## Command-Line Options
 
-### Partitioning Scheme
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--n <int>` | Number of elements per trial. | `10000` |
+| `--trials <int>` | Number of independent runs. | `100` |
+| `--variant <string>` | Pivot rule (`random`, `det_first`, `det_last`, `det_med3`). | `random` |
+| `--input <string>` | Input distribution (`random`, `sorted`, `reverse`, `nearly_sorted`, `few_distinct`). | `random` |
+| `--seed <ull>` | Override the automatically generated base seed. | `chrono::steady_clock` timestamp |
+| `--nearly_k <int>` | Number of swaps applied in the `nearly_sorted` generator. | `10` |
+| `--domain <int>` | Value range size for the `few_distinct` generator. | `5` |
+| `--no-header` | Suppress the CSV header line. | header printed |
 
-Uses **Hoare's partition scheme**:
-- Two pointers move toward each other
-- Swap elements that are on the wrong side
-- Generally faster than Lomuto partition (fewer swaps)
-- Returns partition index for recursive calls
+Arguments are processed sequentially, so each flag that expects a value must be followed immediately by that value.
 
-## Files
-
-- `rqs.cpp` - Main implementation of randomized Quick Sort with Hoare partitioning
-- `run_experiments.sh` - Bash script to run comprehensive experiments
-- `analysis.py` - Python script to analyze results and generate plots
-- `Makefile` - Build configuration
-- `requirements.txt` - Python dependencies
-
-## Implementation Details
+## Implementation Overview
 
 ### Instrumentation
-
-The implementation tracks:
-- **Comparisons**: Number of element comparisons during partitioning
-- **Swaps**: Number of element exchanges
-- **Time**: Wall-clock execution time in milliseconds
 
 ```cpp
 struct Counters {
     unsigned long long comparisons = 0;
     unsigned long long swaps = 0;
+    int max_depth = 0;
 };
 ```
 
-### Key Functions
+- **comparisons** increments each time the partition loop compares an element with the pivot.
+- **swaps** increments via `do_swap`, which wraps every element exchange performed by the algorithm.
+- **max_depth** records the deepest level of recursion reached, helping diagnose unbalanced partitions.
 
-1. **`hoare_partition(A, l, r, c)`**
-   - Implements Hoare's partitioning scheme
-   - Returns partition index
-   - Updates comparison and swap counters
+`ResultRow` (defined near the bottom of the file) packages the outcome of each trial so it can be printed as a single CSV record.
 
-2. **`quicksort(A, l, r, c)`**
-   - Main recursive sorting function
-   - Randomly selects pivot from range [l, r]
-   - Swaps pivot to first position
-   - Recursively sorts left and right subarrays
+### Pivot Selection Strategies
 
-3. **`cswap(a, b, c)`**
-   - Counted swap that increments swap counter
-   - Inline for performance
+Pivot choice is driven by the `variant` string:
 
-## Usage
+- `random`: uniform random index in the current subarray via `rand()`.
+- `det_first`: leftmost element.
+- `det_last`: rightmost element.
+- `det_med3`: median of the first, middle, and last values.
+- Any unrecognized label falls back to the `random` strategy.
 
-### Compilation
+### Partitioning
 
-Using Make:
-```bash
-make
+`quicksort` employs Hoare's partition scheme directly:
+
+1. Seed the pivot in the left slot when necessary.
+2. Advance two indices (`i` from the left, `j` from the right) toward each other, counting comparisons.
+3. Swap out-of-place elements with `do_swap` until the indices cross.
+4. Recurse on the two partitions `[l, q]` and `[q + 1, r]` while updating `max_depth`.
+
+This approach performs fewer swaps than Lomuto's scheme and interacts well with repeated values, though it still benefits from 3-way partitioning when duplicates are common.
+
+### Seeding
+
+Unless the user supplies `--seed`, the program derives a base seed from `std::chrono::steady_clock::now().time_since_epoch().count()`. Each trial uses `seed = base + trial_index`, which keeps runs reproducible while ensuring distinct pseudo-random sequences inside a single execution (`srand(static_cast<unsigned>(seed))`).
+
+## Input Distributions
+
+`run_trial` uses the requested `input_type` to build the working array before sorting:
+
+- `random`: Fisher–Yates shuffle of the sequence `[0, …, n-1]`.
+- `sorted`: Ascending order.
+- `reverse`: Descending order.
+- `nearly_sorted`: Start sorted, then apply `nearly_k` random swaps.
+- `few_distinct`: Each entry is `rand() % domain`, creating many duplicates.
+- Any other label reverts to the `random` generator.
+
+## Output Format
+
+The program writes CSV rows to standard output. Unless `--no-header` is set, the first line is:
+
+```
+algorithm,variant,input_type,n,trial,seed,comparisons,swaps,time_ms,max_depth
 ```
 
-Manual compilation:
-```bash
-g++ -O3 -std=c++17 -march=native rqs.cpp -o rqs
-```
+Each trial then contributes one row, with `time_ms` reported as a fixed-point millisecond duration measured using `std::chrono::steady_clock`.
 
-### Running Individual Sorts
+## Experiment Automation
 
-```bash
-# Basic usage (reads from stdin)
-echo "5 3 1 4 2" | ./rqs
+`run_experiments.sh` automates the benchmark matrix and mirrors the datasets under `results/`:
 
-# Input format:
-# First line: n (number of elements)
-# Second line: n space-separated integers
-```
+- **Array sizes**: `1000`, `5000`, `10000`, `50000`.
+- **Input types**: `random`, `sorted`, `reverse`, `nearly_sorted`, `few_distinct`.
+- **Pivot variants**: `random`, `det_first`, `det_last`, `det_med3`.
+- **Trial counts**: 200 for `n ≤ 5000`, 100 for `n ≤ 10000`, otherwise 30.
+- **Generator parameters**: `--nearly_k 50` for nearly sorted arrays, `--domain 5` for few-distinct arrays.
 
-Example:
-```bash
-echo -e "5\n3 1 4 2 5" | ./rqs
-```
+For each combination the script writes `results/<variant>_<input>_n<size>.csv`. After sweeping all runs it concatenates the data (skipping duplicate headers) into `results/combined_results.csv` so the Python analysis can consume a single file. Review or modify the arrays at the top of the script to tailor the experiment grid to your needs. `analysis.py` reads any CSVs produced by the driver and generates plots under `plots/`.
 
-### Running Experiments
+## Extending the Codebase
 
-The experiment script tests multiple configurations:
+- Add new pivot policies by inserting another branch in the `variant` selection block inside `quicksort`.
+- Factor out the partition loop if you want to compare Hoare against Lomuto or 3-way partitioning.
+- Record additional metrics by updating `Counters` and the CSV emission logic.
+- Swap in C++ `<random>` engines if you require better statistical properties or independent RNG streams.
 
-```bash
-# Run all experiments
-bash run_experiments.sh
+## Known Limitations
 
-# Results will be saved in results/ directory
-```
+- The implementation reuses the global C RNG for both data generation and pivot selection; determinism depends on consistent platform behavior of `rand()`.
+- Deep recursion is possible for extremely unbalanced partitions; tail-recursion elimination or an introspective fallback is a potential enhancement.
+- Arrays with many duplicates can still exhibit extra recursive work without a dedicated 3-way partition routine.
 
-### Experimental Parameters
-
-From `run_experiments.sh`:
-
-**Array Sizes (n)**:
-- 1,000
-- 5,000
-- 10,000
-- 50,000
-
-**Input Types**:
-- `random` - Randomly generated integers
-- `sorted` - Already sorted in ascending order
-- `reverse` - Sorted in descending order
-- `nearly_sorted` - Mostly sorted with k random swaps
-- `few_distinct` - Limited number of distinct values
-
-**Variants** (based on script):
-- `random` - Random pivot selection (main implementation)
-- `det_first` - Deterministic: always choose first element
-- `det_last` - Deterministic: always choose last element
-- `det_med3` - Deterministic: median-of-three
-
-**Number of Trials**:
-- Small arrays (≤5,000): 200 trials
-- Medium arrays (≤10,000): 100 trials
-- Large arrays (>10,000): 30 trials
-
-## Analysis
-
-### Running Analysis Script
-
-```bash
-python analysis.py
-```
-
-This generates:
-1. **Time vs n plots** - For each input type, comparing variants
-2. **Normalized comparison plots** - Comparisons/(n log n) vs n
-3. **Regression analysis** - Fitting T(n) = a·n log n + b·n + c
-
-### Output Files
-
-Results are saved in `results/` directory:
-- Individual CSV files: `{variant}_{input_type}_n{size}.csv`
-- Combined results: `combined_results.csv`
-
-### Plots
-
-Generated in `plots/` directory:
-- `time_vs_n_{input_type}.png` - Runtime comparison
-- `comp_norm_{variant}.png` - Normalized comparison counts
-- `fit_random_random.png` - Regression fit for random/random case
-
-## Expected Results
-
-### Time Complexity
-
-**Randomized Quick Sort** (random pivot):
-- **Average case**: O(n log n)
-- **Worst case**: O(n²) with probability O(1/n!)
-- **Best case**: O(n log n)
-
-### Performance by Input Type
-
-1. **Random Input**: Optimal performance, close to theoretical O(n log n)
-2. **Sorted/Reverse**: Good performance with random pivot (unlike deterministic variants)
-3. **Nearly Sorted**: Similar to random input
-4. **Few Distinct**: Slightly worse due to uneven partitioning
-
-### Comparisons
-
-Expected number of comparisons:
-- Average: ~1.39 n ln n ≈ 2n log₂ n
-- Observed: Should align closely with theoretical predictions
-
-### Swaps
-
-- Generally fewer swaps than comparisons
-- Hoare partition minimizes swaps compared to Lomuto
-
-## Experimental Observations
-
-### Advantages of Randomization
-
-1. **Eliminates worst-case inputs**: No single input triggers O(n²) behavior
-2. **Consistent performance**: Similar runtime across all input types
-3. **No adversarial inputs**: Unlike deterministic pivot selection
-
-### Comparison with Deterministic Variants
-
-- **First element pivot**: O(n²) on sorted/reverse arrays
-- **Last element pivot**: O(n²) on sorted/reverse arrays  
-- **Median-of-three**: Better than first/last but still vulnerable
-- **Random pivot**: Robust across all input distributions
-
-## Dependencies
-
-### C++ Code
-- C++17 or later
-- Standard library: `<iostream>`, `<vector>`, `<cstdlib>`, `<ctime>`
-
-### Analysis Scripts
-- Python 3.6+
-- numpy
-- pandas
-- matplotlib
-
-Install Python dependencies:
-```bash
-pip install -r requirements.txt
-# or
-pip install numpy pandas matplotlib
-```
-
-## Performance Tuning
-
-### Compiler Optimizations
-The Makefile uses:
-- `-O3`: Aggressive optimization
-- `-std=c++17`: C++17 standard
-- `-march=native`: Optimize for local CPU architecture
-
-### Potential Improvements
-
-1. **Hybrid sorting**: Switch to insertion sort for small subarrays (n < 10)
-2. **Three-way partitioning**: Better for arrays with many duplicates
-3. **Tail recursion optimization**: Eliminate one recursive call
-4. **Parallel Quick Sort**: Use threading for large subarrays
-
-## Limitations
-
-### Current Implementation
-- Basic Hoare partitioning (no optimizations)
-- No special handling for duplicate elements
-- Simple random number generation (not cryptographically secure)
-
-### Known Issues
-- Very large arrays may cause stack overflow (deep recursion)
-- Performance degrades with many duplicate values
-
-## Extensions
-
-Possible enhancements:
-1. **Introspective Sort**: Fall back to heap sort if recursion depth exceeds log n
-2. **Three-way partitioning**: Handle duplicates efficiently (Bentley-McIlroy)
-3. **Dual-pivot Quick Sort**: Use two pivots (Java's Arrays.sort approach)
-4. **Parallel Quick Sort**: Multi-threaded version for large arrays
+This README reflects the current `rqs.cpp` implementation so you can navigate, run, and extend the experiment driver with confidence.
 
