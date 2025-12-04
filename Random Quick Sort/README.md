@@ -1,6 +1,4 @@
-echo "5 3 1 4 2" | ./rqs
-echo -e "5\n3 1 4 2 5" | ./rqs
-# Randomized Quick Sort Experiment Driver
+# Randomized Quick Sort Experimentation
 
 This project provides a command-line harness for studying how different Quick Sort pivot policies behave on a variety of input distributions. The core executable (`rqs.cpp`) generates data, runs the selected algorithm variant, and emits CSV-formatted measurements for downstream analysis.
 
